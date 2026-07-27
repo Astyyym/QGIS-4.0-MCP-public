@@ -8,12 +8,12 @@ Examples:
   python3 qgis_mcp.py get_layers
   python3 qgis_mcp.py add_field '{"layer_id":"xxx","field_name":"test","expression":"...", "field_type":"Double"}'
 
-Host and port from env QGIS_MCP_HOST / QGIS_MCP_PORT, defaults to 172.17.192.1:9876.
+Host and port from env QGIS_MCP_HOST / QGIS_MCP_PORT, defaults to 127.0.0.1:9877.
 """
 import socket, json, time, sys, os
 
-HOST = os.environ.get("QGIS_MCP_HOST", "172.17.192.1")
-PORT = int(os.environ.get("QGIS_MCP_PORT", "9876"))
+HOST = os.environ.get("QGIS_MCP_HOST", "127.0.0.1")
+PORT = int(os.environ.get("QGIS_MCP_PORT", "9877"))
 TIMEOUT = 60  # max total wait seconds
 
 
@@ -79,7 +79,7 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python3 qgis_mcp.py <type> [params_json]")
         print("  or:  python3 qgis_mcp.py '{\"type\":\"...\",\"params\":{...}}'")
-        print("\nEnv: QGIS_MCP_HOST (default 172.17.192.1), QGIS_MCP_PORT (default 9876)")
+        print("\nEnv: QGIS_MCP_HOST (default 127.0.0.1), QGIS_MCP_PORT (default 9877)")
         sys.exit(1)
 
     arg = sys.argv[1]

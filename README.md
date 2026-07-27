@@ -27,12 +27,12 @@
 │    Codex 等)         │                      │   src/qgis_mcp/      │
 └─────────────────────┘                      └─────────┬───────────┘
                                                         │ TCP Socket
-                                                        │ port 9876
+                                                        │ port 9877
                                                         ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                     QGIS (4.x)                                  │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │  QGIS MCP 插件 (qgis_mcp_plugin/)                         │  │
+│  │  Astyyym QGIS MCP 插件 (astyyym_qgis_mcp/)                         │  │
 │  │  ┌─────────────────┐    ┌──────────────────────────────┐  │  │
 │  │  │ 控制面板         │    │ 命令分发器                    │  │  │
 │  │  │ (启动/停止)      │───►│ → 37 个工具处理器             │  │  │
@@ -50,7 +50,7 @@
 
 ### 工作流程
 
-1. **QGIS 插件** 在 QGIS 内部开启一个 TCP Socket 服务（默认端口 **9876**），监听 JSON-RPC 命令。
+1. **Astyyym QGIS MCP 插件** 在 QGIS 内部开启一个 TCP Socket 服务（默认端口 **9877**），监听 JSON-RPC 命令。
 2. **MCP Server**（独立的 Python 进程）通过 TCP 连接到 QGIS，通过 `FastMCP` 将每个命令暴露为 MCP 工具。
 3. **AI 客户端**（Claude Desktop、Cursor 等）通过 stdio 使用标准 MCP 协议与 MCP Server 通信，自动发现并调用工具。
 
@@ -90,14 +90,14 @@
 
 ### 1. 安装 QGIS 插件
 
-将 `qgis_mcp_plugin/` 复制到 QGIS 插件目录：
+将 `astyyym_qgis_mcp/` 复制到 QGIS 插件目录：
 
 ```bash
 # Windows via WSL — replace `<WindowsUser>` with your Windows account name
-cp -r qgis_mcp_plugin /mnt/c/Users/<WindowsUser>/AppData/Roaming/QGIS/QGIS4/profiles/default/python/plugins/
+cp -r astyyym_qgis_mcp /mnt/c/Users/<WindowsUser>/AppData/Roaming/QGIS/QGIS4/profiles/default/python/plugins/
 ```
 
-然后在 QGIS 中：**插件 → 管理并安装插件** → 找到 **QGIS MCP** → 勾选启用。工具栏会出现 QGIS MCP 图标。
+然后在 QGIS 中：**插件 → 管理并安装插件** → 找到 **Astyyym QGIS MCP** → 勾选启用。工具栏会出现 Astyyym QGIS MCP 图标。
 
 > **修改插件代码后**，必须完整退出 QGIS 再重新打开（`Stop Server` → `Start Server` 不会重新加载 Python 类定义）。
 
@@ -125,6 +125,8 @@ mcp_servers:
       - qgis_mcp.qgis_mcp_server
     env:
       PYTHONPATH: src
+      QGIS_MCP_HOST: 127.0.0.1
+      QGIS_MCP_PORT: "9877"
     timeout: 120
     connect_timeout: 30
 ```
@@ -137,7 +139,7 @@ mcp_servers:
 
 ### 启动顺序（必须严格遵守）
 
-1. **QGIS** → 点击工具栏 QGIS MCP 图标 → **Start Server**（确认状态 *"Server: Running on port 9876"*）
+1. **QGIS** → 点击工具栏 Astyyym QGIS MCP 图标 → **Start Server**（确认状态 *"Server: Running on port 9877"*）
 2. **Hermes** → 启动 Hermes Desktop（或 `hermes` 命令）
 3. Hermes 启动时自动发现 MCP 工具，之后在 TUI 中直接用自然语言操作
 
@@ -234,12 +236,12 @@ mcp_servers:
 
 ## 安全说明
 
-> **此插件允许任意 PyQGIS 代码通过 TCP socket 远程执行。** 服务绑定 `0.0.0.0:9876`（默认端口），局域网内任何能连到该端口的主机都可以发送命令。
+> **此插件允许任意 PyQGIS 代码通过 TCP socket 远程执行。** 服务绑定 `0.0.0.0:9877`（默认端口），局域网内任何能连到该端口的主机都可以发送命令。
 
-- **不要暴露到公网。** 9876 端口不做鉴权，也没有加密。
+- **不要暴露到公网。** 9877 端口不做鉴权，也没有加密。
 - **建议使用场景：** AI agent（Hermes/Claude）在本地或 WSL 中通过 `172.x.x.x` 内网 IP 连接，不跨机器开放。
 - **`execute_code` 命令是双刃剑：** 它可以做任何事情——包括读写文件、删除图层、多次提交编辑。只在可信环境中使用。
-- **端口可在插件 UI 中更改**（默认 9876），当前连接的 WSL IP 可用 `ipconfig` 查看。
+- **端口可在插件 UI 中更改**（默认 9877），当前连接的 WSL IP 可用 `ipconfig` 查看。
 
 ## 致谢
 

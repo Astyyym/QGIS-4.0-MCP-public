@@ -27,12 +27,12 @@ This is a **QGIS 4.x compatible fork** of [jjsantos01/qgis_mcp](https://github.c
 │    Codex/any MCP)   │                      │   src/qgis_mcp/      │
 └─────────────────────┘                      └─────────┬───────────┘
                                                         │ TCP Socket
-                                                        │ port 9876
+                                                        │ port 9877
                                                         ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                     QGIS (4.x)                                  │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │  QGIS MCP Plugin (qgis_mcp_plugin/)                       │  │
+│  │  Astyyym QGIS MCP Plugin (astyyym_qgis_mcp/)                       │  │
 │  │  ┌─────────────────┐    ┌──────────────────────────────┐  │  │
 │  │  │ Dock Widget     │    │  Command Dispatcher           │  │  │
 │  │  │ (Start/Stop)    │───►│ → 37 tool handlers             │  │  │
@@ -50,7 +50,7 @@ This is a **QGIS 4.x compatible fork** of [jjsantos01/qgis_mcp](https://github.c
 
 ### How it works
 
-1. **QGIS plugin** opens a TCP socket server (default port **9876**) inside QGIS and listens for JSON-RPC commands.
+1. **QGIS plugin** opens a TCP socket server (default port **9877**) inside QGIS and listens for JSON-RPC commands.
 2. **MCP Server** (standalone Python process) connects to QGIS over TCP and exposes each command as an MCP tool via `FastMCP`.
 3. **AI Client** (Claude Desktop, Cursor, etc.) communicates with the MCP Server over stdio using the standard MCP protocol, discovering and invoking tools automatically.
 
@@ -88,20 +88,20 @@ All changes verified against [QGIS 4.0 official PyQGIS docs](https://qgis.org/py
 
 ### 1. Install the QGIS Plugin
 
-Copy `qgis_mcp_plugin/` to your QGIS plugins folder:
+Copy `astyyym_qgis_mcp/` to your QGIS plugins folder:
 
 ```bash
 # Linux
-cp -r qgis_mcp_plugin ~/.local/share/QGIS/QGIS4/profiles/default/python/plugins/
+cp -r astyyym_qgis_mcp ~/.local/share/QGIS/QGIS4/profiles/default/python/plugins/
 
 # Windows via WSL — replace `<WindowsUser>` with your Windows account name
-cp -r qgis_mcp_plugin /mnt/c/Users/<WindowsUser>/AppData/Roaming/QGIS/QGIS4/profiles/default/python/plugins/
+cp -r astyyym_qgis_mcp /mnt/c/Users/<WindowsUser>/AppData/Roaming/QGIS/QGIS4/profiles/default/python/plugins/
 
 # macOS
-cp -r qgis_mcp_plugin ~/Library/Application\ Support/QGIS/QGIS4/profiles/default/python/plugins/
+cp -r astyyym_qgis_mcp ~/Library/Application\ Support/QGIS/QGIS4/profiles/default/python/plugins/
 ```
 
-In QGIS: **Plugins → Manage and Install Plugins** → enable **QGIS MCP**.
+In QGIS: **Plugins → Manage and Install Plugins** → enable **Astyyym QGIS MCP**.
 
 ### 2. Set Up the MCP Server
 
@@ -214,12 +214,12 @@ Add to your `claude_desktop_config.json`:
 
 ## Security
 
-> **This plugin allows arbitrary PyQGIS code execution via TCP socket.** The server binds `0.0.0.0:9876` (default port). Any host that can reach this port on your network can send commands.
+> **This plugin allows arbitrary PyQGIS code execution via TCP socket.** The server binds `0.0.0.0:9877` (default port). Any host that can reach this port on your network can send commands.
 
-- **Do NOT expose to the public internet.** Port 9876 has no authentication or encryption.
+- **Do NOT expose to the public internet.** Port 9877 has no authentication or encryption.
 - **Recommended use:** AI agent (Hermes/Claude) connecting from localhost or WSL via `172.x.x.x` internal IP only — don't open across machines.
 - **`execute_code` is a double-edged sword:** It can do anything — read/write files, delete layers, commit edits. Use only in trusted environments.
-- **Port can be changed** in the plugin UI (default 9876). Check your WSL IP with `ipconfig`.
+- **Port can be changed** in the plugin UI (default 9877). Check your WSL IP with `ipconfig`.
 
 ## Credits
 

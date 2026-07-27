@@ -71,7 +71,7 @@ def _msg_level(level_name):
 class QgisMCPServer(QObject):
     """Server class to handle socket connections and execute QGIS commands"""
 
-    def __init__(self, host='0.0.0.0', port=9876, iface=None):
+    def __init__(self, host='0.0.0.0', port=9877, iface=None):
         super().__init__()
         self.host = host
         self.port = port
@@ -147,10 +147,10 @@ class QgisMCPServer(QObject):
             self.timer.timeout.connect(self.process_server)
             self.timer.start(100)  # 100ms interval
 
-            QgsMessageLog.logMessage(f"QGIS MCP server started on {self.host}:{self.port}", "QGIS MCP")
+            QgsMessageLog.logMessage(f"Astyyym QGIS MCP server started on {self.host}:{self.port}", "Astyyym QGIS MCP")
             return True
         except Exception as e:
-            QgsMessageLog.logMessage(f"Failed to start server: {str(e)}", "QGIS MCP", _msg_level("Critical"))
+            QgsMessageLog.logMessage(f"Failed to start server: {str(e)}", "Astyyym QGIS MCP", _msg_level("Critical"))
             self.stop()
             return False
 
@@ -169,7 +169,7 @@ class QgisMCPServer(QObject):
 
         self.socket = None
         self.client = None
-        QgsMessageLog.logMessage("QGIS MCP server stopped", "QGIS MCP")
+        QgsMessageLog.logMessage("Astyyym QGIS MCP server stopped", "Astyyym QGIS MCP")
 
     def process_server(self):
         """Process server operations (called by timer)"""
@@ -181,11 +181,11 @@ class QgisMCPServer(QObject):
             if not self.client and self.socket:
                 try:
                     self.client, address = self.socket.accept()
-                    QgsMessageLog.logMessage(f"Connected to client: {address}", "QGIS MCP")
+                    QgsMessageLog.logMessage(f"Connected to client: {address}", "Astyyym QGIS MCP")
                 except BlockingIOError:
                     pass  # No connection waiting
                 except Exception as e:
-                    QgsMessageLog.logMessage(f"Error accepting connection: {str(e)}", "QGIS MCP", _msg_level("Warning"))
+                    QgsMessageLog.logMessage(f"Error accepting connection: {str(e)}", "Astyyym QGIS MCP", _msg_level("Warning"))
 
             # Process existing connection
             if self.client:
@@ -210,27 +210,27 @@ class QgisMCPServer(QObject):
                                 pass
                         else:
                             # Connection closed by client
-                            QgsMessageLog.logMessage("Client disconnected", "QGIS MCP")
+                            QgsMessageLog.logMessage("Client disconnected", "Astyyym QGIS MCP")
                             self.client.close()
                             self.client = None
                             self.buffer = b''
                     except BlockingIOError:
                         pass  # No data available
                     except Exception as e:
-                        QgsMessageLog.logMessage(f"Error receiving data: {str(e)}", "QGIS MCP", _msg_level("Warning"))
+                        QgsMessageLog.logMessage(f"Error receiving data: {str(e)}", "Astyyym QGIS MCP", _msg_level("Warning"))
                         self.client.close()
                         self.client = None
                         self.buffer = b''
 
                 except Exception as e:
-                    QgsMessageLog.logMessage(f"Error with client: {str(e)}", "QGIS MCP", _msg_level("Warning"))
+                    QgsMessageLog.logMessage(f"Error with client: {str(e)}", "Astyyym QGIS MCP", _msg_level("Warning"))
                     if self.client:
                         self.client.close()
                         self.client = None
                     self.buffer = b''
 
         except Exception as e:
-            QgsMessageLog.logMessage(f"Server error: {str(e)}", "QGIS MCP", _msg_level("Critical"))
+            QgsMessageLog.logMessage(f"Server error: {str(e)}", "Astyyym QGIS MCP", _msg_level("Critical"))
 
     def execute_command(self, command):
         """Execute a command"""
@@ -241,19 +241,19 @@ class QgisMCPServer(QObject):
             handler = self.handlers.get(cmd_type)
             if handler:
                 try:
-                    QgsMessageLog.logMessage(f"Executing handler for {cmd_type}", "QGIS MCP")
+                    QgsMessageLog.logMessage(f"Executing handler for {cmd_type}", "Astyyym QGIS MCP")
                     result = handler(**params)
-                    QgsMessageLog.logMessage(f"Handler execution complete", "QGIS MCP")
+                    QgsMessageLog.logMessage(f"Handler execution complete", "Astyyym QGIS MCP")
                     return {"status": "success", "result": result}
                 except Exception as e:
-                    QgsMessageLog.logMessage(f"Error in handler: {str(e)}", "QGIS MCP", _msg_level("Critical"))
+                    QgsMessageLog.logMessage(f"Error in handler: {str(e)}", "Astyyym QGIS MCP", _msg_level("Critical"))
                     traceback.print_exc()
                     return {"status": "error", "message": str(e)}
             else:
                 return {"status": "error", "message": f"Unknown command type: {cmd_type}"}
 
         except Exception as e:
-            QgsMessageLog.logMessage(f"Error executing command: {str(e)}", "QGIS MCP", _msg_level("Critical"))
+            QgsMessageLog.logMessage(f"Error executing command: {str(e)}", "Astyyym QGIS MCP", _msg_level("Critical"))
             traceback.print_exc()
             return {"status": "error", "message": str(e)}
 
@@ -875,7 +875,7 @@ class QgisMCPServer(QObject):
                 QgsMessageLog.logMessage(
                     "WARNING: Could not create backup before modifying data — "
                     "layer has no file source or project not saved",
-                    "QGIS MCP", _msg_level("Warning")
+                    "Astyyym QGIS MCP", _msg_level("Warning")
                 )
 
         # Populate with expression
@@ -936,7 +936,7 @@ class QgisMCPServer(QObject):
             QgsMessageLog.logMessage(
                 "WARNING: Could not create backup before deleting fields — "
                 "layer has no file source or project not saved",
-                "QGIS MCP", _msg_level("Warning")
+                "Astyyym QGIS MCP", _msg_level("Warning")
             )
 
         existing = [f.name() for f in layer.fields()]
@@ -1204,7 +1204,7 @@ class QgisMCPServer(QObject):
         layer = self._get_layer(layer_id, "vector")
         backup_path = backup_source(layer)
         if not backup_path:
-            QgsMessageLog.logMessage("WARNING: Could not create backup before area calculation", "QGIS MCP", _msg_level("Warning"))
+            QgsMessageLog.logMessage("WARNING: Could not create backup before area calculation", "Astyyym QGIS MCP", _msg_level("Warning"))
         existing = [field.name() for field in layer.fields()]
         from qgis.core import QgsField, QgsDistanceArea
         from qgis.PyQt.QtCore import QVariant
@@ -1513,7 +1513,7 @@ class QgisMCPDockWidget(QDockWidget):
     closed = pyqtSignal()
 
     def __init__(self, iface):
-        super().__init__("QGIS MCP")
+        super().__init__("Astyyym QGIS MCP")
         self.iface = iface
         self.server = None
         self.setup_ui()
@@ -1530,7 +1530,7 @@ class QgisMCPDockWidget(QDockWidget):
         self.port_spin = QSpinBox()
         self.port_spin.setMinimum(1024)
         self.port_spin.setMaximum(65535)
-        self.port_spin.setValue(9876)
+        self.port_spin.setValue(9877)
         layout.addWidget(self.port_spin)
 
         # Add server control buttons
@@ -1594,14 +1594,14 @@ class QgisMCPPlugin:
         icon_path = os.path.join(os.path.dirname(__file__), "icon.png")
         self.action = QAction(
             QIcon(icon_path) if os.path.exists(icon_path) else QIcon(),
-            "QGIS MCP",
+            "Astyyym QGIS MCP",
             self.iface.mainWindow()
         )
         self.action.setCheckable(True)
         self.action.triggered.connect(self.toggle_dock)
 
         # Add to plugins menu and toolbar
-        self.iface.addPluginToMenu("QGIS MCP", self.action)
+        self.iface.addPluginToMenu("Astyyym QGIS MCP", self.action)
         self.iface.addToolBarIcon(self.action)
 
     def toggle_dock(self, checked):
@@ -1634,7 +1634,7 @@ class QgisMCPPlugin:
             self.dock_widget = None
 
         # Remove plugin menu item and toolbar icon
-        self.iface.removePluginMenu("QGIS MCP", self.action)
+        self.iface.removePluginMenu("Astyyym QGIS MCP", self.action)
         self.iface.removeToolBarIcon(self.action)
 
 

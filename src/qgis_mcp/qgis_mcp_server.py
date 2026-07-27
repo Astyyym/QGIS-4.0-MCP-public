@@ -5,8 +5,10 @@ QGIS MCP Client - Simple client to connect to the QGIS MCP server
 
 import logging
 from contextlib import asynccontextmanager
+import os
 import socket
 import json
+import sys
 from typing import AsyncIterator, Dict, Any
 from mcp.server.fastmcp import FastMCP, Context
 
@@ -15,7 +17,7 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger("QgisMCPServer")
 
 class QgisMCPServer:
-    def __init__(self, host='localhost', port=9876):
+    def __init__(self, host='localhost', port=9877):
         self.host = host
         self.port = port
         self.socket = None
@@ -131,10 +133,11 @@ def get_qgis_connection():
 
     # Create a new connection if needed
     if _qgis_connection is None:
-        host = _get_windows_host_ip()
+        host = os.getenv("QGIS_MCP_HOST", "127.0.0.1")
+        port = int(os.getenv("QGIS_MCP_PORT", "9877"))
         import time
         for attempt in range(3):
-            _qgis_connection = QgisMCPServer(host=host, port=9876)
+            _qgis_connection = QgisMCPServer(host=host, port=port)
             if _qgis_connection.connect():
                 logger.info("Created new persistent connection to Qgis")
                 return _qgis_connection
@@ -487,6 +490,8 @@ def cut_fill(ctx: Context, dem_layer_id: str, design_surface_layer_id: str, outp
 
 def main():
     """Run the MCP server"""
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     mcp.run()
 
 if __name__ == "__main__":
