@@ -488,6 +488,108 @@ def cut_fill(ctx: Context, dem_layer_id: str, design_surface_layer_id: str, outp
 
 
 
+# Project structure, controlled editing, and delivery diagnostics.
+def _call(command: str, params: dict = None) -> str:
+    result = get_qgis_connection().send_command(command, params or {})
+    return json.dumps(result, indent=2, ensure_ascii=False, default=str)
+
+
+@mcp.tool()
+def inspect_project_state(ctx: Context) -> str:
+    """Inspect the current QGIS project, layer hierarchy, variables, layouts, and unsaved state."""
+    return _call("inspect_project_state")
+
+
+@mcp.tool()
+def get_layer_tree(ctx: Context) -> str:
+    """Return the real QGIS group/layer tree with visibility and order."""
+    return _call("get_layer_tree")
+
+
+@mcp.tool()
+def inspect_layer(ctx: Context, layer_id: str) -> str:
+    """Inspect a layer's source, CRS, extent, schema, feature count, and edit/selection state."""
+    return _call("inspect_layer", {"layer_id": layer_id})
+
+
+@mcp.tool()
+def get_project_diagnostics(ctx: Context) -> str:
+    """Report invalid layers, empty vector layers, active edits, CRS consistency, and save risks."""
+    return _call("get_project_diagnostics")
+
+
+@mcp.tool()
+def query_features(ctx: Context, layer_id: str, expression: str = None, fields: list = None, limit: int = 100, selected_only: bool = False) -> str:
+    """Read selected or expression-filtered vector attributes without editing data."""
+    return _call("query_features", {"layer_id": layer_id, "expression": expression, "fields": fields, "limit": limit, "selected_only": selected_only})
+
+
+@mcp.tool()
+def get_layer_statistics(ctx: Context, layer_id: str, fields: list = None, expression: str = None) -> str:
+    """Calculate null, unique, and numeric summary statistics for matching vector features."""
+    return _call("get_layer_statistics", {"layer_id": layer_id, "fields": fields, "expression": expression})
+
+
+@mcp.tool()
+def validate_expression(ctx: Context, layer_id: str, expression: str) -> str:
+    """Validate a QGIS expression and count matching features without writing."""
+    return _call("validate_expression", {"layer_id": layer_id, "expression": expression})
+
+
+@mcp.tool()
+def manage_selection(ctx: Context, layer_id: str, operation: str = "get", expression: str = None, feature_ids: list = None) -> str:
+    """Read or update the in-memory QGIS selection; this never writes the data source."""
+    return _call("manage_selection", {"layer_id": layer_id, "operation": operation, "expression": expression, "feature_ids": feature_ids})
+
+
+@mcp.tool()
+def calculate_field(ctx: Context, layer_id: str, field_name: str, expression: str, filter_expression: str = None, dry_run: bool = True) -> str:
+    """Preview or calculate an existing field in a short guarded transaction. dry_run defaults to true."""
+    return _call("calculate_field", {"layer_id": layer_id, "field_name": field_name, "expression": expression, "filter_expression": filter_expression, "dry_run": dry_run})
+
+
+@mcp.tool()
+def update_feature_attributes(ctx: Context, layer_id: str, changes: dict, expression: str = None, feature_ids: list = None, dry_run: bool = True) -> str:
+    """Preview or apply named attribute updates only; geometry writes are excluded. dry_run defaults to true."""
+    return _call("update_feature_attributes", {"layer_id": layer_id, "changes": changes, "expression": expression, "feature_ids": feature_ids, "dry_run": dry_run})
+
+
+@mcp.tool()
+def delete_features(ctx: Context, layer_id: str, expression: str = None, feature_ids: list = None, dry_run: bool = True) -> str:
+    """Preview or delete explicitly matched vector features in a short guarded transaction. dry_run defaults to true."""
+    return _call("delete_features", {"layer_id": layer_id, "expression": expression, "feature_ids": feature_ids, "dry_run": dry_run})
+
+
+@mcp.tool()
+def validate_project_for_delivery(ctx: Context) -> str:
+    """Check project path, unsaved changes, invalid sources, active edits, and CRS risks before delivery."""
+    return _call("validate_project_for_delivery")
+
+
+@mcp.tool()
+def validate_processing_result(ctx: Context, layer_id: str = None, output_path: str = None, expectations: dict = None) -> str:
+    """Verify a result layer or output file against type, CRS, and feature-count expectations."""
+    return _call("validate_processing_result", {"layer_id": layer_id, "output_path": output_path, "expectations": expectations})
+
+
+@mcp.tool()
+def verify_output_file(ctx: Context, path: str, expected_type: str = None) -> str:
+    """Check that an output path exists and QGIS can reopen it as a vector, raster, or project file."""
+    return _call("verify_output_file", {"path": path, "expected_type": expected_type})
+
+
+@mcp.tool()
+def get_operation_log(ctx: Context, limit: int = 50) -> str:
+    """Return the bounded audit log for commands handled by this QGIS plugin instance."""
+    return _call("get_operation_log", {"limit": limit})
+
+
+@mcp.tool()
+def capture_project_state(ctx: Context) -> str:
+    """Capture a timestamped read-only project and diagnostics snapshot for before/after comparison."""
+    return _call("capture_project_state")
+
+
 def main():
     """Run the MCP server"""
     if hasattr(sys.stdout, "reconfigure"):

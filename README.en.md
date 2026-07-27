@@ -35,7 +35,7 @@ This is a **QGIS 4.x compatible fork** of [jjsantos01/qgis_mcp](https://github.c
 │  │  Astyyym QGIS MCP Plugin (astyyym_qgis_mcp/)                       │  │
 │  │  ┌─────────────────┐    ┌──────────────────────────────┐  │  │
 │  │  │ Dock Widget     │    │  Command Dispatcher           │  │  │
-│  │  │ (Start/Stop)    │───►│ → 37 tool handlers             │  │  │
+│  │  │ (Start/Stop)    │───►│ → 51 tool handlers             │  │  │
 │  │  └─────────────────┘    │  → JSON-RPC over TCP          │  │  │
 │  │                         └──────────────┬───────────────┘  │  │
 │  │                                        ▼                  │  │
@@ -211,6 +211,29 @@ Add to your `claude_desktop_config.json`:
 | `zonal_statistics` | Calculate raster zonal statistics into vector zones | `raster_layer_id`, `zone_layer_id`, `output_path`, `prefix?`, `statistics?` |
 
 ---
+
+### Project Structure, Controlled Editing, and Delivery Diagnostics
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `inspect_project_state` | Inspect project, layer tree, variables, layouts, and unsaved state | None |
+| `get_layer_tree` | Return the real group/layer hierarchy, order, and visibility | None |
+| `inspect_layer` | Inspect source, CRS, extent, schema, selection, and edit state | `layer_id` |
+| `get_project_diagnostics` | Summarize invalid/empty layers, active edits, and CRS risks | None |
+| `query_features` | Read expression-filtered or selected attributes without source writes | `layer_id`, `expression?`, `fields?`, `limit?`, `selected_only?` |
+| `get_layer_statistics` | Calculate null, unique, and numeric field statistics | `layer_id`, `fields?`, `expression?` |
+| `validate_expression` | Validate a QGIS expression and count its matches | `layer_id`, `expression` |
+| `manage_selection` | Read or update QGIS' in-memory selection without source writes | `layer_id`, `operation?`, `expression?`, `feature_ids?` |
+| `calculate_field` | Preview or calculate an existing field; dry-run by default | `layer_id`, `field_name`, `expression`, `filter_expression?`, `dry_run?` |
+| `update_feature_attributes` | Preview or batch-update attributes only; no geometry writes; dry-run by default | `layer_id`, `changes`, `expression?`, `feature_ids?`, `dry_run?` |
+| `delete_features` | Preview or delete explicitly matched features; dry-run by default | `layer_id`, `expression?`, `feature_ids?`, `dry_run?` |
+| `validate_project_for_delivery` | Check project path, unsaved changes, invalid sources, edits, and CRS | None |
+| `validate_processing_result` | Verify result-layer or output-file type, CRS, and feature-count expectations | `layer_id?`, `output_path?`, `expectations?` |
+| `verify_output_file` | Check that output exists and QGIS can reopen it | `path`, `expected_type?` |
+| `get_operation_log` | Return the audit log from this plugin instance | `limit?` |
+| `capture_project_state` | Capture a timestamped project and diagnostics snapshot | None |
+
+> Write tools default to `dry_run=true` and only report the affected feature count. Set `dry_run=false` explicitly to commit. Attribute updates and deletion also require an `expression` or `feature_ids` to prevent unfiltered bulk writes.
 
 ## Security
 

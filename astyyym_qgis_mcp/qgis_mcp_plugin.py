@@ -4,6 +4,7 @@ import sys
 import json
 import socket
 import traceback
+import datetime
 from qgis.core import *
 from qgis.gui import *
 from qgis.PyQt.QtCore import QObject, pyqtSignal, QTimer, Qt, QSize
@@ -81,6 +82,8 @@ class QgisMCPServer(QObject):
         self.client = None
         self.buffer = b''
         self.timer = None
+        self.operation_log = []
+        self.operation_log_limit = 200
         # Build handlers dict once, not per-command
         self.handlers = {
             "ping": self.ping,
@@ -129,6 +132,23 @@ class QgisMCPServer(QObject):
             "create_grid": self.create_grid,
             "idw_interpolation": self.idw_interpolation,
             "cut_fill": self.cut_fill,
+            # Project structure, controlled editing, and delivery diagnostics
+            "inspect_project_state": self.inspect_project_state,
+            "get_layer_tree": self.get_layer_tree,
+            "inspect_layer": self.inspect_layer,
+            "get_project_diagnostics": self.get_project_diagnostics,
+            "query_features": self.query_features,
+            "get_layer_statistics": self.get_layer_statistics,
+            "validate_expression": self.validate_expression,
+            "manage_selection": self.manage_selection,
+            "calculate_field": self.calculate_field,
+            "update_feature_attributes": self.update_feature_attributes,
+            "delete_features": self.delete_features,
+            "validate_project_for_delivery": self.validate_project_for_delivery,
+            "validate_processing_result": self.validate_processing_result,
+            "verify_output_file": self.verify_output_file,
+            "get_operation_log": self.get_operation_log,
+            "capture_project_state": self.capture_project_state,
         }
 
     def start(self):
@@ -234,25 +254,27 @@ class QgisMCPServer(QObject):
 
     def execute_command(self, command):
         """Execute a command"""
+        cmd_type = command.get("type")
+        params = command.get("params", {})
+        started_at = datetime.datetime.now().isoformat(timespec="seconds")
         try:
-            cmd_type = command.get("type")
-            params = command.get("params", {})
-
             handler = self.handlers.get(cmd_type)
             if handler:
                 try:
                     QgsMessageLog.logMessage(f"Executing handler for {cmd_type}", "Astyyym QGIS MCP")
                     result = handler(**params)
                     QgsMessageLog.logMessage(f"Handler execution complete", "Astyyym QGIS MCP")
+                    self._record_operation(cmd_type, params, "success", started_at, result)
                     return {"status": "success", "result": result}
                 except Exception as e:
+                    self._record_operation(cmd_type, params, "error", started_at, {"message": str(e)})
                     QgsMessageLog.logMessage(f"Error in handler: {str(e)}", "Astyyym QGIS MCP", _msg_level("Critical"))
                     traceback.print_exc()
                     return {"status": "error", "message": str(e)}
-            else:
-                return {"status": "error", "message": f"Unknown command type: {cmd_type}"}
-
+            self._record_operation(cmd_type, params, "error", started_at, {"message": "Unknown command type"})
+            return {"status": "error", "message": f"Unknown command type: {cmd_type}"}
         except Exception as e:
+            self._record_operation(cmd_type, params, "error", started_at, {"message": str(e)})
             QgsMessageLog.logMessage(f"Error executing command: {str(e)}", "Astyyym QGIS MCP", _msg_level("Critical"))
             traceback.print_exc()
             return {"status": "error", "message": str(e)}
@@ -1506,6 +1528,430 @@ class QgisMCPServer(QObject):
             "layer_id": new_id,
             "note": "Positive values = cut (dem higher than design), Negative = fill",
         }
+
+
+    # ------------------------------------------------------------------
+    # Project structure, controlled editing, and delivery diagnostics
+    # ------------------------------------------------------------------
+
+    def _record_operation(self, command, params, status, started_at, result):
+        """Retain a bounded, JSON-safe audit trail for MCP commands."""
+        def compact(value, limit=1000):
+            try:
+                text = json.dumps(value, default=str, ensure_ascii=False)
+            except Exception:
+                text = repr(value)
+            return text if len(text) <= limit else text[:limit] + "..."
+
+        entry = {
+            "timestamp": started_at,
+            "command": command,
+            "status": status,
+            "params": compact(params, 600),
+            "result": compact(result),
+        }
+        self.operation_log.append(entry)
+        if len(self.operation_log) > self.operation_log_limit:
+            del self.operation_log[:-self.operation_log_limit]
+
+    def _extent_dict(self, extent):
+        return {
+            "x_min": extent.xMinimum(), "y_min": extent.yMinimum(),
+            "x_max": extent.xMaximum(), "y_max": extent.yMaximum(),
+        }
+
+    def _safe_value(self, value):
+        if value is None:
+            return None
+        if isinstance(value, (str, int, float, bool)):
+            return value
+        try:
+            return value.toString()
+        except Exception:
+            return str(value)
+
+    def _field_schema(self, layer):
+        return [
+            {
+                "name": field.name(),
+                "type": field.typeName(),
+                "length": field.length(),
+                "precision": field.precision(),
+            }
+            for field in layer.fields()
+        ]
+
+    def _validate_expression_for_layer(self, layer, expression):
+        expression = (expression or "").strip()
+        if not expression:
+            return None, {"valid": True, "expression": "", "message": "No filter supplied; all features match."}
+        expr = QgsExpression(expression)
+        if expr.hasParserError():
+            return None, {"valid": False, "expression": expression, "error": expr.parserErrorString()}
+        referenced = set(expr.referencedColumns())
+        known = {field.name() for field in layer.fields()}
+        missing = sorted(referenced - known)
+        if missing:
+            return None, {
+                "valid": False, "expression": expression,
+                "error": f"Unknown field references: {missing}",
+                "missing_fields": missing,
+            }
+        context = QgsProject.instance().createExpressionContext()
+        context.appendScopes(QgsExpressionContextUtils.globalProjectLayerScopes(layer))
+        return expr, {"valid": True, "expression": expression}
+
+    def _matching_feature_ids(self, layer, expression=None, feature_ids=None):
+        if feature_ids is not None:
+            known = {feature.id() for feature in layer.getFeatures()}
+            requested = [int(fid) for fid in feature_ids]
+            missing = [fid for fid in requested if fid not in known]
+            if missing:
+                raise Exception(f"Feature IDs not found: {missing[:20]}")
+            return requested, {"valid": True, "expression": None}
+        expr, validation = self._validate_expression_for_layer(layer, expression)
+        if not validation["valid"]:
+            raise Exception(f"Invalid expression: {validation['error']}")
+        request = QgsFeatureRequest(expr) if expr else QgsFeatureRequest()
+        return [feature.id() for feature in layer.getFeatures(request)], validation
+
+    def _feature_payload(self, feature, field_names):
+        return {
+            "id": feature.id(),
+            "attributes": {name: self._safe_value(feature[name]) for name in field_names},
+            "has_geometry": bool(feature.hasGeometry() and not feature.geometry().isEmpty()),
+        }
+
+    def _layer_tree_node(self, node):
+        if isinstance(node, QgsLayerTreeGroup):
+            return {
+                "kind": "group", "name": node.name(), "visible": node.isVisible(),
+                "children": [self._layer_tree_node(child) for child in node.children()],
+            }
+        if isinstance(node, QgsLayerTreeLayer):
+            layer = node.layer()
+            return {
+                "kind": "layer", "id": layer.id() if layer else None,
+                "name": layer.name() if layer else node.name(),
+                "visible": node.isVisible(),
+                "valid": bool(layer and layer.isValid()),
+                "type": self._get_layer_type(layer) if layer else "missing",
+            }
+        return {"kind": "unknown", "name": node.name()}
+
+    def _project_variables(self, project):
+        try:
+            scope = QgsExpressionContextUtils.projectScope(project)
+            return {name: self._safe_value(scope.variable(name)) for name in scope.variableNames()}
+        except Exception:
+            return {}
+
+    def inspect_project_state(self, **kwargs):
+        """Return the project structure and current state without modifying it."""
+        project = QgsProject.instance()
+        layouts = []
+        try:
+            layouts = [layout.name() for layout in project.layoutManager().printLayouts()]
+        except Exception:
+            pass
+        extent = self.iface.mapCanvas().extent() if self.iface else None
+        return {
+            "filename": project.fileName(), "title": project.title(),
+            "crs": project.crs().authid(), "is_dirty": project.isDirty(),
+            "layer_count": len(project.mapLayers()), "layer_tree": self.get_layer_tree()["tree"],
+            "layouts": layouts, "project_variables": self._project_variables(project),
+            "canvas_extent": self._extent_dict(extent) if extent else None,
+        }
+
+    def get_layer_tree(self, **kwargs):
+        """Return QGIS' actual layer/group hierarchy and visibility state."""
+        return {"tree": self._layer_tree_node(QgsProject.instance().layerTreeRoot())}
+
+    def inspect_layer(self, layer_id, **kwargs):
+        """Return structured metadata for a vector or raster layer."""
+        layer = self._get_layer(layer_id)
+        root = QgsProject.instance().layerTreeRoot()
+        tree_layer = root.findLayer(layer_id)
+        result = {
+            "layer_id": layer.id(), "name": layer.name(), "valid": layer.isValid(),
+            "type": self._get_layer_type(layer), "provider": layer.providerType(),
+            "source": layer.source(), "crs": layer.crs().authid(),
+            "extent": self._extent_dict(layer.extent()),
+            "visible": bool(tree_layer and tree_layer.isVisible()),
+            "group": self._get_group_path(tree_layer) if tree_layer else "",
+        }
+        if _is_vector_layer(layer):
+            result.update({
+                "geometry_type": _geometry_type_str_from_layer(layer),
+                "feature_count": layer.featureCount(), "fields": self._field_schema(layer),
+                "selected_count": layer.selectedFeatureCount(), "is_editable": layer.isEditable(),
+            })
+        elif _is_raster_layer(layer):
+            result.update({"width": layer.width(), "height": layer.height(), "band_count": layer.bandCount()})
+        return result
+
+    def get_project_diagnostics(self, **kwargs):
+        """Summarize project-level data, CRS, and unsaved-edit risks."""
+        project = QgsProject.instance()
+        invalid_layers, empty_layers, editable_layers = [], [], []
+        for layer in project.mapLayers().values():
+            if not layer.isValid():
+                invalid_layers.append({"layer_id": layer.id(), "name": layer.name(), "source": layer.source()})
+                continue
+            if _is_vector_layer(layer):
+                if layer.featureCount() == 0:
+                    empty_layers.append({"layer_id": layer.id(), "name": layer.name()})
+                if layer.isEditable():
+                    editable_layers.append({"layer_id": layer.id(), "name": layer.name()})
+        crs = self.check_crs_consistency()
+        return {
+            "project_file": project.fileName(), "project_is_dirty": project.isDirty(),
+            "invalid_layers": invalid_layers, "empty_vector_layers": empty_layers,
+            "editable_layers": editable_layers, "crs_consistency": crs,
+            "ok": not invalid_layers and not editable_layers,
+        }
+
+    def query_features(self, layer_id, expression=None, fields=None, limit=100, selected_only=False, **kwargs):
+        """Read vector attributes after optional expression or selection filtering."""
+        layer = self._get_layer(layer_id, "vector")
+        if limit < 1 or limit > 1000:
+            raise Exception("limit must be between 1 and 1000")
+        field_names = fields or [field.name() for field in layer.fields()]
+        unknown = sorted(set(field_names) - {field.name() for field in layer.fields()})
+        if unknown:
+            raise Exception(f"Unknown fields: {unknown}")
+        if selected_only:
+            request = QgsFeatureRequest().setFilterFids(layer.selectedFeatureIds())
+            validation = {"valid": True, "expression": None, "selected_only": True}
+        else:
+            expr, validation = self._validate_expression_for_layer(layer, expression)
+            if not validation["valid"]:
+                return {"layer_id": layer_id, "features": [], "matched_count": 0, "validation": validation}
+            request = QgsFeatureRequest(expr) if expr else QgsFeatureRequest()
+        features = []
+        for feature in layer.getFeatures(request):
+            features.append(self._feature_payload(feature, field_names))
+            if len(features) >= limit:
+                break
+        return {"layer_id": layer_id, "fields": field_names, "features": features, "returned_count": len(features), "validation": validation}
+
+    def get_layer_statistics(self, layer_id, fields=None, expression=None, **kwargs):
+        """Calculate concise attribute statistics for matching vector features."""
+        layer = self._get_layer(layer_id, "vector")
+        field_names = fields or [field.name() for field in layer.fields()]
+        unknown = sorted(set(field_names) - {field.name() for field in layer.fields()})
+        if unknown:
+            raise Exception(f"Unknown fields: {unknown}")
+        expr, validation = self._validate_expression_for_layer(layer, expression)
+        if not validation["valid"]:
+            return {"layer_id": layer_id, "validation": validation, "feature_count": 0, "fields": {}}
+        values = {name: [] for name in field_names}
+        request = QgsFeatureRequest(expr) if expr else QgsFeatureRequest()
+        feature_count = 0
+        for feature in layer.getFeatures(request):
+            feature_count += 1
+            for name in field_names:
+                values[name].append(feature[name])
+        stats = {}
+        for name, field_values in values.items():
+            present = [value for value in field_values if value is not None]
+            numeric = [float(value) for value in present if isinstance(value, (int, float)) and not isinstance(value, bool)]
+            item = {"null_count": len(field_values) - len(present), "unique_count": len({str(value) for value in present})}
+            if numeric:
+                item.update({"min": min(numeric), "max": max(numeric), "mean": sum(numeric) / len(numeric)})
+            stats[name] = item
+        return {"layer_id": layer_id, "feature_count": feature_count, "fields": stats, "validation": validation}
+
+    def validate_expression(self, layer_id, expression, **kwargs):
+        """Parse a QGIS expression and report its matching feature count without writing."""
+        layer = self._get_layer(layer_id, "vector")
+        expr, validation = self._validate_expression_for_layer(layer, expression)
+        if not validation["valid"]:
+            return {"layer_id": layer_id, **validation, "matched_count": 0}
+        request = QgsFeatureRequest(expr) if expr else QgsFeatureRequest()
+        return {"layer_id": layer_id, **validation, "matched_count": sum(1 for _ in layer.getFeatures(request))}
+
+    def manage_selection(self, layer_id, operation="get", expression=None, feature_ids=None, **kwargs):
+        """Read or change QGIS' in-memory selection; this never writes the data source."""
+        layer = self._get_layer(layer_id, "vector")
+        operation = operation.lower()
+        if operation == "get":
+            return {"layer_id": layer_id, "selected_ids": list(layer.selectedFeatureIds()), "selected_count": layer.selectedFeatureCount()}
+        if operation == "clear":
+            layer.removeSelection()
+            return {"layer_id": layer_id, "operation": operation, "selected_count": 0}
+        ids, validation = self._matching_feature_ids(layer, expression, feature_ids)
+        behavior_map = {
+            "set": QgsVectorLayer.SelectBehavior.SetSelection,
+            "add": QgsVectorLayer.SelectBehavior.AddToSelection,
+            "remove": QgsVectorLayer.SelectBehavior.RemoveFromSelection,
+            "intersect": QgsVectorLayer.SelectBehavior.IntersectSelection,
+        }
+        if operation not in behavior_map:
+            raise Exception("operation must be get, clear, set, add, remove, or intersect")
+        layer.selectByIds(ids, behavior_map[operation])
+        return {"layer_id": layer_id, "operation": operation, "matched_count": len(ids), "selected_count": layer.selectedFeatureCount(), "validation": validation}
+
+    def _run_short_edit(self, layer, operation, ids, dry_run, apply_change):
+        summary = {"layer_id": layer.id(), "layer_name": layer.name(), "operation": operation, "affected_count": len(ids), "dry_run": dry_run}
+        if dry_run:
+            return summary
+        if layer.isEditable():
+            raise Exception("Layer is already in an edit session; finish or roll back it before MCP writes.")
+        backup_path = backup_source(layer)
+        if not layer.startEditing():
+            raise Exception(f"Could not start edit session: {layer.commitErrors()}")
+        layer.beginEditCommand(operation)
+        try:
+            apply_change()
+            layer.endEditCommand()
+            if not layer.commitChanges():
+                errors = layer.commitErrors()
+                layer.rollBack()
+                raise Exception(f"Commit failed and was rolled back: {errors}")
+        except Exception:
+            try:
+                layer.destroyEditCommand()
+            except Exception:
+                pass
+            layer.rollBack()
+            raise
+        summary["backup_path"] = backup_path
+        summary["committed"] = True
+        return summary
+
+    def calculate_field(self, layer_id, field_name, expression, filter_expression=None, dry_run=True, **kwargs):
+        """Calculate an existing field for matching features in a short, guarded edit transaction."""
+        layer = self._get_layer(layer_id, "vector")
+        if field_name not in {field.name() for field in layer.fields()}:
+            raise Exception(f"Field does not exist: {field_name}. Add it explicitly before calculating values.")
+        expr = QgsExpression(expression)
+        if expr.hasParserError():
+            raise Exception(f"Invalid calculation expression: {expr.parserErrorString()}")
+        ids, validation = self._matching_feature_ids(layer, filter_expression)
+        field_index = layer.fields().indexOf(field_name)
+        context = QgsProject.instance().createExpressionContext()
+        context.appendScopes(QgsExpressionContextUtils.globalProjectLayerScopes(layer))
+        def apply_change():
+            for feature in layer.getFeatures(QgsFeatureRequest().setFilterFids(ids)):
+                context.setFeature(feature)
+                value = expr.evaluate(context)
+                if expr.hasEvalError():
+                    raise Exception(f"Expression evaluation failed for feature {feature.id()}: {expr.evalErrorString()}")
+                if not layer.changeAttributeValue(feature.id(), field_index, value):
+                    raise Exception(f"Could not update feature {feature.id()}")
+        result = self._run_short_edit(layer, "calculate_field", ids, dry_run, apply_change)
+        result.update({"field_name": field_name, "expression": expression, "validation": validation})
+        return result
+
+    def update_feature_attributes(self, layer_id, changes, expression=None, feature_ids=None, dry_run=True, **kwargs):
+        """Set named attribute values for selected matching features; geometry writes are intentionally excluded."""
+        layer = self._get_layer(layer_id, "vector")
+        if not isinstance(changes, dict) or not changes:
+            raise Exception("changes must be a non-empty object mapping field names to values")
+        indexes = {name: layer.fields().indexOf(name) for name in changes}
+        unknown = [name for name, index in indexes.items() if index < 0]
+        if unknown:
+            raise Exception(f"Unknown fields: {unknown}")
+        if expression is None and feature_ids is None:
+            raise Exception("Provide expression or feature_ids for attribute updates; use an explicit expression such as '1=1' to target every feature.")
+        ids, validation = self._matching_feature_ids(layer, expression, feature_ids)
+        def apply_change():
+            for fid in ids:
+                for name, value in changes.items():
+                    if not layer.changeAttributeValue(fid, indexes[name], value):
+                        raise Exception(f"Could not update {name} for feature {fid}")
+        result = self._run_short_edit(layer, "update_feature_attributes", ids, dry_run, apply_change)
+        result.update({"changed_fields": sorted(changes), "validation": validation})
+        return result
+
+    def delete_features(self, layer_id, expression=None, feature_ids=None, dry_run=True, **kwargs):
+        """Delete explicitly matched vector features in a guarded short transaction."""
+        layer = self._get_layer(layer_id, "vector")
+        if expression is None and feature_ids is None:
+            raise Exception("Provide expression or feature_ids for deletion; use an explicit expression such as '1=1' to target every feature.")
+        ids, validation = self._matching_feature_ids(layer, expression, feature_ids)
+        if not ids:
+            return {"layer_id": layer_id, "operation": "delete_features", "affected_count": 0, "dry_run": dry_run, "validation": validation}
+        def apply_change():
+            if not layer.deleteFeatures(ids):
+                raise Exception("QGIS refused to delete one or more features")
+        result = self._run_short_edit(layer, "delete_features", ids, dry_run, apply_change)
+        result["validation"] = validation
+        return result
+
+    def validate_project_for_delivery(self, **kwargs):
+        """Check whether the current project has save, source, CRS, or edit-state blockers."""
+        project = QgsProject.instance()
+        diagnostics = self.get_project_diagnostics()
+        project_path = project.fileName()
+        issues = []
+        if not project_path:
+            issues.append({"severity": "error", "code": "unsaved_project", "message": "Project has no file path."})
+        elif not os.path.isfile(project_path):
+            issues.append({"severity": "error", "code": "missing_project_file", "message": project_path})
+        if diagnostics["project_is_dirty"]:
+            issues.append({"severity": "warning", "code": "unsaved_changes", "message": "Project has unsaved changes."})
+        for item in diagnostics["invalid_layers"]:
+            issues.append({"severity": "error", "code": "invalid_layer", **item})
+        for item in diagnostics["editable_layers"]:
+            issues.append({"severity": "warning", "code": "active_edit_session", **item})
+        if not diagnostics["crs_consistency"]["consistent"]:
+            issues.append({"severity": "warning", "code": "mixed_crs", "details": diagnostics["crs_consistency"]["crs_groups"]})
+        return {"project_file": project_path, "ready": not any(item["severity"] == "error" for item in issues), "issues": issues, "diagnostics": diagnostics}
+
+    def verify_output_file(self, path, expected_type=None, **kwargs):
+        """Check that an output file exists and can be reopened by QGIS."""
+        if not path or not os.path.isfile(path):
+            return {"path": path, "exists": False, "valid": False, "error": "File does not exist."}
+        suffix = os.path.splitext(path)[1].lower()
+        if expected_type == "project" or suffix in {".qgs", ".qgz"}:
+            temporary_project = QgsProject()
+            can_read = temporary_project.read(path)
+            return {
+                "path": path, "exists": True, "valid": bool(can_read), "type": "project",
+                "layer_count": len(temporary_project.mapLayers()) if can_read else 0,
+                "error": "QGIS could not read the project file." if not can_read else None,
+            }
+        vector = QgsVectorLayer(path, "verification", "ogr")
+        if vector.isValid():
+            return {"path": path, "exists": True, "valid": True, "type": "vector", "feature_count": vector.featureCount(), "crs": vector.crs().authid(), "fields": self._field_schema(vector)}
+        raster = QgsRasterLayer(path, "verification")
+        if raster.isValid():
+            return {"path": path, "exists": True, "valid": True, "type": "raster", "width": raster.width(), "height": raster.height(), "band_count": raster.bandCount(), "crs": raster.crs().authid()}
+        return {"path": path, "exists": True, "valid": False, "error": "QGIS could not load this file as vector or raster."}
+
+    def validate_processing_result(self, layer_id=None, output_path=None, expectations=None, **kwargs):
+        """Validate an existing result layer or output path against simple expectations."""
+        expectations = expectations or {}
+        result = self.inspect_layer(layer_id) if layer_id else self.verify_output_file(output_path)
+        checks = []
+        for key in ("type", "crs", "feature_count", "min_feature_count"):
+            if key not in expectations:
+                continue
+            actual = result.get("feature_count") if key == "min_feature_count" else result.get(key)
+            expected = expectations[key]
+            if key == "min_feature_count" and actual is not None:
+                passed = actual >= expected
+            elif key == "type" and expected in {"vector", "raster"}:
+                passed = actual == expected or str(actual).startswith(expected + "_")
+            else:
+                passed = actual == expected
+            checks.append({"key": key, "expected": expected, "actual": actual, "passed": passed})
+        return {"target": layer_id or output_path, "valid": bool(result.get("valid", True)), "checks": checks, "passed": bool(result.get("valid", True)) and all(check["passed"] for check in checks), "details": result}
+
+    def get_operation_log(self, limit=50, **kwargs):
+        """Return the bounded audit trail for commands handled by this plugin instance."""
+        if limit < 1 or limit > self.operation_log_limit:
+            raise Exception(f"limit must be between 1 and {self.operation_log_limit}")
+        return {"entries": self.operation_log[-limit:], "entry_count": len(self.operation_log)}
+
+    def capture_project_state(self, **kwargs):
+        """Return a timestamped, read-only project snapshot suitable for before/after comparison."""
+        state = self.inspect_project_state()
+        state["captured_at"] = datetime.datetime.now().isoformat(timespec="seconds")
+        state["diagnostics"] = self.get_project_diagnostics()
+        return state
 
 
 class QgisMCPDockWidget(QDockWidget):

@@ -35,7 +35,7 @@
 │  │  Astyyym QGIS MCP 插件 (astyyym_qgis_mcp/)                         │  │
 │  │  ┌─────────────────┐    ┌──────────────────────────────┐  │  │
 │  │  │ 控制面板         │    │ 命令分发器                    │  │  │
-│  │  │ (启动/停止)      │───►│ → 37 个工具处理器             │  │  │
+│  │  │ (启动/停止)      │───►│ → 51 个工具处理器             │  │  │
 │  │  └─────────────────┘    │ → JSON-RPC over TCP           │  │  │
 │  │                         └──────────────┬───────────────┘  │  │
 │  │                                        ▼                  │  │
@@ -196,6 +196,29 @@ mcp_servers:
 | `add_field` | 添加字段并赋值（表达式/排序） | `layer_id`, `field_name`, `field_type`, `expression?`, `rank_by?` |
 | `delete_fields` | 批量删除字段 | `layer_id`, `field_names: [列表]` |
 | `reorder_fields` | 安全重排序字段（创建新文件，不动原始数据） | `layer_id`, `field_order: [有序名称列表]`, `output_path?` |
+
+### 工程理解、受控编辑与交付诊断
+
+| 工具名 | 说明 | 参数 |
+|--------|------|------|
+| `inspect_project_state` | 返回工程、图层树、工程变量、布局列表和未保存状态 | 无 |
+| `get_layer_tree` | 返回真实分组、层级、顺序与可见性 | 无 |
+| `inspect_layer` | 检查数据源、CRS、范围、字段、选择集和编辑状态 | `layer_id` |
+| `get_project_diagnostics` | 汇总失效图层、空矢量图层、活动编辑和 CRS 风险 | 无 |
+| `query_features` | 按表达式或当前选择集读取属性，不写源数据 | `layer_id`, `expression?`, `fields?`, `limit?`, `selected_only?` |
+| `get_layer_statistics` | 计算空值、唯一值和数值统计 | `layer_id`, `fields?`, `expression?` |
+| `validate_expression` | 校验 QGIS 表达式并返回预计命中数 | `layer_id`, `expression` |
+| `manage_selection` | 获取或修改 QGIS 内存选择集，不写数据源 | `layer_id`, `operation?`, `expression?`, `feature_ids?` |
+| `calculate_field` | 预览或计算已有字段；默认仅 dry run | `layer_id`, `field_name`, `expression`, `filter_expression?`, `dry_run?` |
+| `update_feature_attributes` | 预览或批量更新属性，不支持几何改写；默认仅 dry run | `layer_id`, `changes`, `expression?`, `feature_ids?`, `dry_run?` |
+| `delete_features` | 预览或删除明确匹配的要素；默认仅 dry run | `layer_id`, `expression?`, `feature_ids?`, `dry_run?` |
+| `validate_project_for_delivery` | 交付前检查工程路径、未保存改动、失效源、编辑状态和 CRS | 无 |
+| `validate_processing_result` | 校验图层或输出文件的类型、CRS、要素数预期 | `layer_id?`, `output_path?`, `expectations?` |
+| `verify_output_file` | 检查输出存在且可被 QGIS 重开 | `path`, `expected_type?` |
+| `get_operation_log` | 返回本次插件实例已处理操作的审计记录 | `limit?` |
+| `capture_project_state` | 生成带时间戳的工程与诊断快照 | 无 |
+
+> 写入型工具默认 `dry_run=true`，只返回将受影响的要素数。实际写入必须显式传入 `dry_run=false`；属性更新与删除还必须提供 `expression` 或 `feature_ids`，避免无筛选批量修改。
 
 ### 数据质检与叠合分析
 
